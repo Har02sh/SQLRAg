@@ -7,8 +7,119 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def extract_entities_with_llm(user_question):
+    """
+    Uses the LLM to extract rank and name entities from the user question.
+    This is more robust than regex for handling abbreviations and variations.
+    """
+    prompt = f"""
+    Extract the military rank and name from the following query:
+    "{user_question}"
+    
+    Military ranks can appear in many forms, including:
+    - Full forms (e.g., "Lieutenant Colonel")
+    - Abbreviated forms (e.g., "Lt Col", "Capt", "Sgt Maj")
+    - With or without periods (e.g., "Lt." vs "Lt")
+    
+    Respond in this exact JSON format only, with no additional text:
+    {{
+        "rank": "extracted rank or null if none found",
+        "name": "extracted name or null if none found"
+    }}
+    
+    If no rank is detected, return null for rank.
+    If no name is detected, return null for name.
+    """
+    
+    try:
+        response = ollama.chat(model='mistral:7b', messages=[
+            {
+                'role': 'user',
+                'content': prompt
+            }
+        ])
+        
+        response_text = response['message']['content'].strip()
+        
+        # Extract JSON from the response (in case there's any additional text)
+        json_match = re.search(r'({.*})', response_text, re.DOTALL)
+        if json_match:
+            import json
+            try:
+                entity_data = json.loads(json_match.group(1))
+                rank = entity_data.get('rank')
+                name = entity_data.get('name')
+                
+                # Handle null values
+                if rank == "null" or not rank:
+                    rank = None
+                if name == "null" or not name:
+                    name = None
+                    
+                return rank, name
+            except json.JSONDecodeError:
+                pass
+    
+    except Exception as e:
+        print(f"Error using LLM for entity extraction: {e}")
+    
+    # Fall back to regex-based approach if LLM extraction fails
+    return fallback_extract_rank_and_name(user_question)
+
+
+def fallback_extract_rank_and_name(query):
+    """
+    Fallback method using regex patterns to extract rank and name.
+    This is much more flexible than exact matching.
+    """
+    # Common rank abbreviations and their patterns
+    rank_patterns = [
+        r'\b(lt\s*col|lieutenant\s*colonel)\b',
+        r'\b(col|colonel)\b',
+        r'\b(gen|general)\b',
+        r'\b(maj|major)\b',
+        r'\b(capt|captain)\b',
+        r'\b(sgt|sergeant)(\s*maj|\s*major)?\b',
+        r'\b(cpl|corporal)\b',
+        r'\b(pvt|private)\b',
+        r'\b(adm|admiral)\b',
+        r'\b(cmdr|commander)\b',
+        # Add more patterns for your ranks
+    ]
+    
+    query_lower = query.lower()
+    rank = None
+    
+    # Try to match any rank pattern
+    for pattern in rank_patterns:
+        match = re.search(pattern, query_lower, re.IGNORECASE)
+        if match:
+            rank = match.group(0)
+            # Remove the rank from the query
+            query = re.sub(pattern, '', query, flags=re.IGNORECASE).strip()
+            break
+    
+    # Look for a name pattern after removing the rank
+    # This regex looks for consecutive words that start with capital letters
+    name_match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)', query)
+    name = name_match.group(1) if name_match else None
+    
+    # If no name found with the capital letter pattern, try a more general approach
+    if not name:
+        # Remove common question words
+        clean_query = re.sub(r'\b(what|is|the|of|for|by|phone|number|address|contact)\b', '', query, flags=re.IGNORECASE)
+        words = [word for word in clean_query.split() if word.strip()]
+        if words:
+            name = ' '.join(words)
+    
+    return rank, name
+
 def generate_sql_query(user_question):
-    # Schema information to provide context to the LLM
+    # Extract rank and name using the LLM-based approach
+    rank, name = extract_entities_with_llm(user_question)
+    
+    # Schema information for the LLM
     schema_context = """
     Table: Contacts
     Columns:
@@ -19,12 +130,35 @@ def generate_sql_query(user_question):
     - address (TEXT)
     """
     
-    # Updated prompt with explicit security constraints
+    # Build the prompt with extracted entities
     prompt = f"""Given the following database schema:
     {schema_context}
     
     Generate a SQL query to answer this question: "{user_question}"
     
+    ADDITIONAL INFORMATION:
+    """
+    
+    if rank and name:
+        prompt += f"""
+        - I've identified that the user is looking for someone with:
+          * Rank: "{rank}"
+          * Name: "{name}"
+        - Use LIKE conditions for both rank and name to allow for partial matches
+        - For example: WHERE rank LIKE '%{rank}%' AND name LIKE '%{name}%'
+        """
+    elif rank:
+        prompt += f"""
+        - I've identified that the user is looking for someone with rank: "{rank}"
+        - Use a LIKE condition: WHERE rank LIKE '%{rank}%'
+        """
+    elif name:
+        prompt += f"""
+        - I've identified that the user is looking for someone with name: "{name}"
+        - Use a LIKE condition: WHERE name LIKE '%{name}%'
+        """
+    
+    prompt += """
     CRITICAL SECURITY CONSTRAINTS:
     - You MUST use ONLY SELECT statements
     - You MUST ONLY query the Contacts table
@@ -35,6 +169,7 @@ def generate_sql_query(user_question):
     Return ONLY the raw SQL query with NO markdown formatting, NO backticks, and NO explanations.
     """
     
+    # Get SQL from LLM
     response = ollama.chat(model='mistral:7b', messages=[
         {
             'role': 'user',
@@ -42,9 +177,21 @@ def generate_sql_query(user_question):
         }
     ])
     
-    # Extract just the SQL query from the response and clean it
+    # Extract and clean SQL query
     sql_query = response['message']['content'].strip()
+    sql_query = clean_sql_query(sql_query)
     
+    # Ensure rank and name are properly used in the query if they were detected
+    sql_query = ensure_entities_in_query(sql_query, rank, name)
+    
+    # Validate for security
+    safe_query = validate_and_sanitize_sql(sql_query)
+    
+    return safe_query, rank, name
+
+
+def clean_sql_query(sql_query):
+    """Clean up the SQL query from LLM response formatting"""
     # Remove markdown code formatting if present
     if sql_query.startswith("```"):
         # Find the end of the first line to skip language identifier
@@ -58,11 +205,38 @@ def generate_sql_query(user_question):
     
     # Additional cleanup - remove any remaining backticks
     sql_query = sql_query.replace('`', '')
+    return sql_query
+
+def ensure_entities_in_query(sql_query, rank, name):
+    """Ensure rank and name are properly included in the query if they were detected"""
+    sql_upper = sql_query.upper()
     
-    # Validate the SQL query for safety
-    safe_query = validate_and_sanitize_sql(sql_query)
+    # If we have entities but there's no WHERE clause
+    if (rank or name) and "WHERE" not in sql_upper:
+        # Add WHERE clause if missing but there's a LIMIT
+        if "LIMIT" in sql_upper:
+            sql_query = sql_query.replace("LIMIT", "WHERE 1=1 LIMIT")
+            sql_upper = sql_query.upper()  # Update after modification
     
-    return safe_query
+    # If we identified a rank and it's not in the query
+    if rank and "rank" not in sql_query.lower():
+        # Escape any single quotes in the rank
+        safe_rank = rank.replace("'", "''")
+        if "WHERE" in sql_upper:
+            sql_query = sql_query.replace("WHERE", f"WHERE rank LIKE '%{safe_rank}%' AND")
+        elif "LIMIT" in sql_upper:
+            sql_query = sql_query.replace("LIMIT", f"WHERE rank LIKE '%{safe_rank}%' LIMIT")
+    
+    # If we identified a name and it's not in the query
+    if name and "name" not in sql_query.lower():
+        # Escape any single quotes in the name
+        safe_name = name.replace("'", "''")
+        if "WHERE" in sql_upper:
+            sql_query = sql_query.replace("WHERE", f"WHERE name LIKE '%{safe_name}%' AND")
+        elif "LIMIT" in sql_upper:
+            sql_query = sql_query.replace("LIMIT", f"WHERE name LIKE '%{safe_name}%' LIMIT")
+            
+    return sql_query
 
 def validate_and_sanitize_sql(sql_query):
     """
@@ -207,62 +381,33 @@ def format_natural_language_response(user_question, results, sql_query=None):
 
 def answer_user_question(user_question):
     try:
-        # Generate SQL query using LLM with safety validation
-        sql_query = generate_sql_query(user_question)
-        
-        # Additional logging for debugging
+        sql_query, rank, name = generate_sql_query(user_question)
         print(f"Generated SQL query: {sql_query}")
-        
-        try:
-            # Execute the query
-            conn = get_db_connection()
+
+        results = []
+        with get_db_connection() as conn:
             cursor = conn.cursor()
-            
-            # Execute the query with proper error handling
-            try:
-                cursor.execute(sql_query)
-                results = cursor.fetchall()
-            except sqlite3.Error as sql_error:
-                # Log the error with the query for debugging
-                print(f"SQL Error: {str(sql_error)}, Query: {sql_query}")
-                raise ValueError(f"Database error: {str(sql_error)}")
-            finally:
-                conn.close()
-            
-            # Format results as dictionaries
-            formatted_results = [dict(row) for row in results]
-            
-            # Generate natural language response
-            nl_response = format_natural_language_response(user_question, formatted_results, sql_query)
-            
-            return {
-                "question": user_question,
-                "sql_query": sql_query,  # Include for debugging
-                "formatted_response": nl_response,
-                "raw_results": formatted_results,  # Include raw results for potential further processing
-                "result_count": len(formatted_results)
-            }
-        
-        except Exception as e:
-            # Catch any other errors during execution
-            error_message = f"Error executing query: {str(e)}"
-            return {
-                "question": user_question,
-                "error": str(e),
-                "formatted_response": "I'm sorry, I encountered an error while retrieving the information. This issue has been logged for review."
-            }
-    
+            cursor.execute(sql_query)  # Now sql_query is a string, not a tuple
+            results = cursor.fetchall()
+
+        formatted_results = [dict(row) for row in results]
+        return {
+            "question": user_question,
+            "sql_query": sql_query,
+            "formatted_response": format_natural_language_response(user_question, formatted_results, sql_query),
+            "raw_results": formatted_results,
+            "result_count": len(formatted_results)
+        }
+
     except ValueError as ve:
-        # Handle validation errors (likely from SQL validation)
         return {
             "question": user_question,
             "error": str(ve),
             "formatted_response": f"I'm sorry, I couldn't create a safe query for your question: {str(ve)}"
         }
     except Exception as e:
-        error_message = f"I'm sorry, I encountered an error while trying to answer your question: {str(e)}"
         return {
             "question": user_question,
             "error": str(e),
-            "formatted_response": error_message
+            "formatted_response": f"I'm sorry, I encountered an error while trying to answer your question: {str(e)}"
         }
