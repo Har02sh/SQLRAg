@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Assistant</title>
+    <link rel="stylesheet" href="{{url_for('static', filename='CSS/style.css')}}">
+    </head>
+<body>
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <button class="new-chat-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 4V20M4 12H20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                New chat
+            </button>
+        </div>
+        
+        <div class="chat-history">
+            <!-- History items will be dynamically added here -->
+            <div class="history-item">
+                <svg class="history-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span>Data analysis project</span>
+            </div>
+            <div class="history-item">
+                <svg class="history-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span>Python coding help</span>
+            </div>
+            <div class="history-item">
+                <svg class="history-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span>Website ideas brainstorm</span>
+            </div>
+        </div>
+        
+        <div class="user-section">
+            <div class="user-info">
+                <div class="user-avatar">U</div>
+                <span>Your Account</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Chat Area -->
+    <main class="main">
+        <button class="menu-button" id="menu-toggle">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 12H21M3 6H21M3 18H21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+        </button>
+
+        <div class="chat-container" id="chat-container">
+            <!-- Messages will be dynamically added here -->
+            <!-- Welcome screen (shows when no messages yet) -->
+            <div class="welcome-container" id="welcome-screen">
+                <h1 class="welcome-title">How can I help you today?</h1>
+                
+                <div class="examples-container">
+                    <div class="example-card" data-prompt="Explain quantum computing in simple terms">
+                        <div class="example-title">Explain quantum computing in simple terms</div>
+                        <div class="example-text">Get straightforward explanations for complex topics</div>
+                    </div>
+                    
+                    <div class="example-card" data-prompt="Write a Python function to analyze CSV data">
+                        <div class="example-title">Write a Python function to analyze CSV data</div>
+                        <div class="example-text">Get coding assistance for specific tasks</div>
+                    </div>
+                    
+                    <div class="example-card" data-prompt="Help me design a database schema for a blog">
+                        <div class="example-title">Help me design a database schema for a blog</div>
+                        <div class="example-text">Get assistance with technical planning</div>
+                    </div>
+                    
+                    <div class="example-card" data-prompt="Write a professional email requesting a deadline extension">
+                        <div class="example-title">Write a professional email requesting a deadline extension</div>
+                        <div class="example-text">Draft communications for various situations</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-container">
+                <textarea class="message-input" id="message-input" placeholder="Message the AI assistant..." rows="1"></textarea>
+                <button class="send-button" id="send-button" disabled>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M22 2L11 13M22 2L15 22L11 13M11 13L2 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            </div>
+            <p class="disclaimer">AI Assistant may produce inaccurate information about people, places, or facts.</p>
+        </div>
+    </main>
+</body>
+<script src="{{url_for('static', filename='JS/script.js')}}"></script>
+</html>
+
+
+
+    

@@ -1,1 +1,5 @@
 /venv
+test.py
+*.db-journal
+*.sqbpro
+*.db
